@@ -1,11 +1,12 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
+import fs from "fs";
 
 // gathering information about movies
 async function fetchMovieData(platform) {
   try {
     const website = await axios.get(
-      `https://filmweb.pl/ranking/vod/${platform}/film/2023`
+      `https://filmweb.pl/ranking/vod/${platform[0]}/film/2023`
     );
     const $ = cheerio.load(website.data);
 
@@ -21,9 +22,9 @@ async function fetchMovieData(platform) {
           .replace(",", ".");
         // fullfill an array with the objects
         movies.push({
-          title: movieTitle,
-          vod: platform,
-          rating: parseFloat(movieRating),
+          Title: movieTitle,
+          "VOD service name": platform[1],
+          Rating: parseFloat(movieRating),
         });
       });
 
@@ -37,31 +38,68 @@ async function fetchMovieData(platform) {
 async function scrapeMovies() {
   try {
     // list of VODs platforms
-    const vods = ["netflix", "hbo_max", "canal_plus", "disney"];
-    const headers = ["Title", "VOD Title Service", "Rating"];
+    const vodServices = {
+      netflix: "Netflix",
+      hbo_max: "HBO Max",
+      canal_plus: "Canal+",
+      disney: "Disney+",
+    };
 
-    const promises = vods.map((platform) => fetchMovieData(platform));
+    const promises = Object.entries(vodServices).map((platform) =>
+      fetchMovieData(platform)
+    );
     const results = await Promise.all(promises);
     const scrappedData = results.flat();
 
     // sorting an movies by rating (or title)
     scrappedData.sort((movie1, movie2) => {
       return (
-        movie2.rating - movie1.rating ||
-        movie1.title.localeCompare(movie2.title)
+        movie2["Rating"] - movie1["Rating"] ||
+        movie1["Title"].localeCompare(movie2["Title"])
       );
     });
 
     // unique movie titles
-    const result = new Map();
-    scrappedData.forEach((movie) =>
-      result.set(movie.title, Object.values(movie))
-    );
+    const uniqueMovieMap = new Map();
+    scrappedData.forEach((movie) => uniqueMovieMap.set(movie["Title"], movie));
 
-    console.log(result);
+    return uniqueMovieMap;
   } catch (error) {
     console.error("Error:", error);
   }
 }
 
-scrapeMovies();
+async function csvCreator() {
+  const movieMap = await scrapeMovies();
+  const csvMovieContent = createCsvContent(Array.from(movieMap.values()));
+
+  // write CSV content to a file
+  fs.writeFile("movies.csv", csvMovieContent, "utf8", (err) => {
+    if (err) {
+      console.error("Error writing CSV file:", err);
+      return;
+    }
+    console.log("CSV file has been created!");
+  });
+}
+
+function createCsvContent(data) {
+  // extract column headers from the first object
+  const headers = Object.keys(data[0]);
+
+  // create CSV header row
+  const csvHeader = headers.join(",");
+
+  // create CSV data rows
+  const csvRows = data.map((row) => {
+    const values = Object.values(row).join(",");
+    return values;
+  });
+
+  // combine header row and data rows
+  const csvContent = [csvHeader, ...csvRows].join("\n");
+
+  return csvContent;
+}
+
+csvCreator();
